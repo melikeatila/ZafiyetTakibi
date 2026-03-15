@@ -24,3 +24,6 @@ logs/
 
 
 raporlar/*.html
+
+*.session
+*.session-journal
