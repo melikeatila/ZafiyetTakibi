@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Raporlar</title>
+    <link rel="stylesheet" href="/statik/style.css">
+    <style>
+        .rapor-btns { display:flex; gap:8px; }
+        .btn-rapor {
+            display:inline-flex; align-items:center; justify-content:center;
+            padding:7px 12px; border-radius:10px; border:1px solid transparent;
+            font-size:13px; font-weight:600; text-decoration:none; cursor:pointer; transition:.15s ease;
+        }
+        .btn-ac { background:#1f2937; color:#fff; border-color:#374151; }
+        .btn-ac:hover { background:#111827; }
+        .btn-gonder { background:#2563eb; color:#fff; border-color:#1d4ed8; }
+        .btn-gonder:hover { background:#1d4ed8; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Haftalık Raporlar</h1>
+        <p>Oluşturulan raporlar ve gönderim yönetimi</p>
+        <a href="/" class="btn-link">← Dashboard'a dön</a>
+    </header>
+
+    <section class="section">
+        <h2>Raporlar</h2>
+        <button onclick="raporOlustur()" style="padding:10px 14px;border:none;border-radius:8px;cursor:pointer;">
+            + Yeni Rapor Oluştur
+        </button>
+        <div id="raporDurum" style="margin-top:10px;color:#888;"></div>
+        <div id="raporlarListesi" style="margin-top:16px;"></div>
+    </section>
+
+    <section class="section">
+        <h2>Mail Aboneleri</h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <input id="ad_soyad" placeholder="Ad Soyad" style="padding:10px;min-width:220px;">
+            <input id="email" placeholder="Email" style="padding:10px;min-width:260px;">
+            <button onclick="aboneEkle()" style="padding:10px 14px;">Abone Ekle</button>
+        </div>
+        <div id="aboneDurum" style="margin-top:10px;color:#888;"></div>
+        <div id="abonelerListesi" style="margin-top:16px;"></div>
+    </section>
+</div>
+
+<script>
+function parseTrDateTime(tr) {
+    const [datePart, timePart = "00:00"] = tr.split(" ");
+    const [dd, mm, yyyy] = datePart.split(".").map(Number);
+    const [HH, MM] = timePart.split(":").map(Number);
+    return new Date(yyyy, mm - 1, dd, HH, MM, 0, 0);
+}
+
+function formatTrDate(d) {
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    return `${dd}.${mm}.${yyyy}`;
+}
+
+function haftalikRaporBasligi(olusturmaTarihi) {
+    const end = parseTrDateTime(olusturmaTarihi);
+    const start = new Date(end);
+    start.setDate(end.getDate() - 7);
+    return `${formatTrDate(start)} — ${formatTrDate(end)} Haftalık Raporu`;
+}
+
+async function raporlariGetir() {
+    const el = document.getElementById("raporlarListesi");
+    const res = await fetch("/api/raporlar");
+    const data = await res.json();
+
+    if (!data.raporlar?.length) {
+        el.innerHTML = "<p>Henüz rapor yok.</p>";
+        return;
+    }
+
+    el.innerHTML = data.raporlar.map(r => `
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px;border-bottom:1px solid #2a2a4e;">
+            <div>
+                <strong>${haftalikRaporBasligi(r.olusturma_tarihi)}</strong><br>
+                <small>Oluşturulma: ${r.olusturma_tarihi}</small>
+            </div>
+            <div class="rapor-btns">
+                <a href="${r.url}" target="_blank" class="btn-rapor btn-ac">Aç</a>
+                <button onclick="raporGonder('${r.dosya_adi}')" class="btn-rapor btn-gonder">Gönder</button>
+            </div>
+        </div>
+    `).join("");
+}
+
+async function raporOlustur() {
+    const durum = document.getElementById("raporDurum");
+    durum.textContent = "Rapor oluşturuluyor...";
+    const res = await fetch("/api/rapor-olustur", { method: "POST" });
+    const data = await res.json();
+    durum.textContent = data.mesaj || "Tamamlandı";
+    raporlariGetir();
+}
+
+async function raporGonder(dosyaAdi) {
+    const konu = prompt("Mail konusu (boş bırakılırsa otomatik):", "");
+    const res = await fetch("/api/rapor-gonder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dosya_adi: dosyaAdi, konu: konu || null })
+    });
+    const data = await res.json();
+    alert(`${data.mesaj || "Tamamlandı"} | Başarılı: ${data.basarili ?? 0} | Başarısız: ${data.basarisiz ?? 0}`);
+}
+
+async function aboneleriGetir() {
+    const el = document.getElementById("abonelerListesi");
+    const res = await fetch("/api/aboneler");
+    const data = await res.json();
+
+    if (!data.aboneler?.length) {
+        el.innerHTML = "<p>Aktif abone yok.</p>";
+        return;
+    }
+
+    el.innerHTML = data.aboneler.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid #2a2a4e;">
+            <div>${a.ad_soyad} - ${a.email}</div>
+            <button
+                onclick="aboneSil('${a.email}')"
+                title="Aboneyi sil"
+                aria-label="Aboneyi sil"
+                style="padding:6px 10px;border:none;border-radius:8px;cursor:pointer;background:#ef4444;color:#fff;">
+                🗑️
+            </button>
+        </div>
+    `).join("");
+}
+
+async function aboneEkle() {
+    const ad_soyad = document.getElementById("ad_soyad").value.trim();
+    const email = document.getElementById("email").value.trim();
+    const durum = document.getElementById("aboneDurum");
+    if (!ad_soyad || !email) return;
+
+    const res = await fetch("/api/abone-ekle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_soyad, email })
+    });
+    const data = await res.json();
+    durum.textContent = data.mesaj || data.hata || "İşlem tamamlandı";
+    aboneleriGetir();
+}
+
+async function aboneSil(email) {
+    await fetch(`/api/abone-sil/${encodeURIComponent(email)}`, { method: "DELETE" });
+    aboneleriGetir();
+}
+
+raporlariGetir();
+aboneleriGetir();
+</script>
+</body>
+</html>

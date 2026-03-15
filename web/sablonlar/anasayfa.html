@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zafiyet Takip Sistemi</title>
+    <link rel="stylesheet" href="/statik/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+    <h1> Zafiyet Takip Sistemi</h1>
+    <p>Gerçek zamanlı güvenlik zafiyet izleme ve analiz platformu</p>
+
+    <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px; color:#10b981; font-weight:600;">
+            <span id="statusIcon">🟢</span>
+            <span id="statusText">Bağlı - Canlı İzleme Aktif</span>
+            <span id="lastUpdate" style="color:#888; font-weight:400; margin-left:8px;">Son güncelleme: -</span>
+        </div>
+
+        <a href="/raporlar"
+           style="display:inline-block;padding:10px 16px;border-radius:8px;background:#00d4ff;color:#0f0f1e;text-decoration:none;font-weight:700;">
+             Haftalık Raporlar
+        </a>
+    </div>
+        
+        <div class="stats-grid" style="margin-top: 28px;">
+            <div class="stat-card toplam">
+                <div class="stat-number">{{ toplam }}</div>
+                <div class="stat-label">Toplam Zafiyet</div>
+                <div class="stat-footer">Son 7 gün: {{ son_7_gun }}</div>
+            </div>
+            
+            <div class="stat-card kritik">
+                <div class="stat-number">{{ kritik }}</div>
+                <div class="stat-label">Kritik</div>
+                <div class="stat-footer">{% if toplam > 0 %}{{ (kritik / toplam * 100) | round(1) }}%{% else %}0%{% endif %}</div>
+            </div>
+            
+            <div class="stat-card yuksek">
+                <div class="stat-number">{{ yuksek }}</div>
+                <div class="stat-label">Yüksek</div>
+                <div class="stat-footer">{% if toplam > 0 %}{{ (yuksek / toplam * 100) | round(1) }}%{% else %}0%{% endif %}</div>
+            </div>
+            
+            <div class="stat-card orta">
+                <div class="stat-number">{{ orta }}</div>
+                <div class="stat-label">Orta</div>
+                <div class="stat-footer">{% if toplam > 0 %}{{ (orta / toplam * 100) | round(1) }}%{% else %}0%{% endif %}</div>
+            </div>
+            
+            <div class="stat-card dusuk">
+                <div class="stat-number">{{ dusuk }}</div>
+                <div class="stat-label">Düşük</div>
+                <div class="stat-footer">{% if toplam > 0 %}{{ (dusuk / toplam * 100) | round(1) }}%{% else %}0%{% endif %}</div>
+            </div>
+            
+            <div class="stat-card analiz">
+                <div class="stat-number">{{ analiz_bekleyen }}</div>
+                <div class="stat-label">Analiz Bekleyen</div>
+                <div class="stat-footer">{{ analiz_edilmis }} analiz edildi</div>
+            </div>
+        </div>
+
+        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 40px;">
+            <div class="stat-card cve-var">
+                <div class="stat-number">{{ cve_var }}</div>
+                <div class="stat-label">CVE Tanımlı</div>
+                <div class="stat-footer">Resmi kimlik numarası var</div>
+            </div>
+            
+            <div class="stat-card cve-yok">
+                <div class="stat-number">{{ cve_yok }}</div>
+                <div class="stat-label">CVE Tanımsız</div>
+                <div class="stat-footer">Henüz CVE atanmamış</div>
+            </div>
+
+            <div class="stat-card kaynak-github">
+                <div class="stat-number">{{ github_sayisi }}</div>
+                <div class="stat-label">GitHub</div>
+                <div class="stat-footer">Security Advisories</div>
+            </div>
+
+            <div class="stat-card kaynak-telegram">
+                <div class="stat-number">{{ telegram_sayisi }}</div>
+                <div class="stat-label">Telegram</div>
+                <div class="stat-footer">Anlık bildirimler</div>
+            </div>
+        </div>
+        
+<section class="section">
+    <h2> Trend Zafiyetler (Son 7 Gün)</h2>
+    <div class="trend-grid">
+        {% for trend in trend_zafiyetler %}
+{% set onem_raw = (trend.max_onem or 'BILINMIYOR')|upper %}
+{% if 'KRİTİK' in onem_raw or 'KRITIK' in onem_raw %}
+    {% set onem_class = 'kritik' %}
+{% elif 'YÜKSEK' in onem_raw or 'YUKSEK' in onem_raw %}
+    {% set onem_class = 'yuksek' %}
+{% elif 'ORTA' in onem_raw %}
+    {% set onem_class = 'orta' %}
+{% elif 'DÜŞÜK' in onem_raw or 'DUSUK' in onem_raw %}
+    {% set onem_class = 'dusuk' %}
+{% else %}
+    {% set onem_class = 'bilinmiyor' %}
+{% endif %}
+
+
+<div class="trend-card" onclick="window.open('{{ trend.url }}', '_blank')">
+    <div class="trend-header">
+        <span class="badge badge-{{ onem_class }}">{{ trend.kategori }}</span>
+        {% set kaynak = (trend.kaynak or '')|lower %}
+        <span class="source-badge {{ kaynak if kaynak in ['github','telegram'] else 'unknown' }}">
+            {% if kaynak == 'github' %}
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+                GitHub
+            {% elif kaynak == 'telegram' %}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+                </svg>
+                Telegram
+            {% else %}
+                {{ trend.kaynak or 'Kaynak' }}
+            {% endif %}
+        </span>
+            
+        
+    </div>
+    <h3 class="trend-title trend-title-{{ onem_class }}" title="{{ trend.baslik }}">
+    {{ trend.baslik | replace('https://', '') | replace('http://', '') | replace('www.', '') }}
+    </h3>
+
+    
+
+    <div class="trend-software">
+        <span class="trend-yazilim" title="{{ trend.yazilim }}">
+            {{ trend.yazilim }}
+        </span>
+    </div>
+
+    <div class="trend-stats">
+        <div class="trend-count">
+            <span class="trend-number">{{ trend.adet }}</span>
+            <span class="trend-label">Tekrar</span>
+        </div>
+        <div class="trend-severity">
+            <span class="badge badge-{{ onem_class }}">
+                {{ trend.max_onem }}
+            </span>
+        </div>
+    </div>
+
+    <div class="trend-footer">
+        Son: {{ trend.son_tarih }}
+    </div>
+</div>
+{% endfor %}
+        
+    </div>
+</section>
+
+
+
+        <div class="section">
+            <h2> Kategori ve Önem Dağılımı</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
+               
+                <div style="background: var(--bg-hover); padding: 20px; border-radius: 12px;">
+                    <h3 style="text-align: center; margin-bottom: 20px; color: var(--accent);">Kategoriler</h3>
+                    <div style="position: relative; height: 300px;">
+                        <canvas id="kategoriChart"></canvas>
+                    </div>
+                </div>
+
+                
+                <div style="background: var(--bg-hover); padding: 20px; border-radius: 12px;">
+                    <h3 style="text-align: center; margin-bottom: 20px; color: var(--accent);">Önem Dereceleri</h3>
+                    <div style="position: relative; height: 300px;">
+                        <canvas id="onemChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        
+        <div class="section">
+            <h2>Zafiyet Arama</h2>
+            <div class="filter-form">
+                <input type="text" id="yazilim" placeholder="Yazılım adı (ör: WordPress, Apache)">
+                <select id="onem">
+                    <option value="">Tüm Önem Dereceleri</option>
+                    <option value="KRITIK">Kritik</option>
+                    <option value="YUKSEK">Yüksek</option>
+                    <option value="ORTA">Orta</option>
+                    <option value="DUSUK">Düşük</option>
+                </select>
+                <input type="text" id="kategori" placeholder="Kategori (ör: SQL Injection, XSS)">
+                <button onclick="ara()">Ara</button>
+            </div>
+            <div id="sonuclar" class="search-results"></div>
+        </div>
+
+        <div class="section">
+            <h2>CVE Tanımlı Zafiyetler (Son 10)</h2>
+            {% if cve_zafiyetler %}
+            <table class="zafiyet-table">
+                <thead>
+                    <tr>
+                        <th>Kaynak</th>
+                        <th>CVE</th>
+                        <th>Önem</th>
+                        <th>Başlık</th>
+                        <th>Yazılım</th>
+                        <th>Kategori</th>
+                        <th>Tarih</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for zafiyet in cve_zafiyetler %}
+                    <tr>
+                        <td>
+                            {% if zafiyet.kaynak == 'GitHub' %}
+                            <span class="source-badge github">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                                </svg>
+                            </span>
+                            {% elif zafiyet.kaynak == 'Telegram' %}
+                            <span class="source-badge telegram">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM8.287 5.906c-.778.324-2.334.994-4.666 2.01-.378.15-.577.298-.595.442-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294.26.006.549-.1.868-.32 2.179-1.471 3.304-2.214 3.374-2.23.05-.012.12-.026.166.016.047.041.042.12.037.141-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8.154 8.154 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629.093.06.183.125.27.187.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.426 1.426 0 0 0-.013-.315.337.337 0 0 0-.114-.217.526.526 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09z"/>
+                                </svg>
+                            </span>
+                            {% else %}
+                            <span class="source-badge unknown">?</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if zafiyet.extracted_cve %}
+                            <strong class="cve-badge">{{ zafiyet.extracted_cve }}</strong>
+                            {% elif zafiyet.cve_numarasi %}
+                            <strong class="cve-badge">{{ zafiyet.cve_numarasi }}</strong>
+                            {% else %}
+                            <span class="cve-badge" style="background: #555; opacity: 0.6;">Bulunamadı</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'bilinmiyor' }}">
+                                {{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'Bilinmiyor' }}
+                            </span>
+                        </td>
+                        <td class="baslik-cell">{{ zafiyet.baslik[:40] }}{% if zafiyet.baslik|length > 40 %}...{% endif %}</td>
+                        <td>{{ zafiyet.etkilenen_yazilimlar[:20] if zafiyet.etkilenen_yazilimlar else '-' }}</td>
+                        <td>{{ zafiyet.kategori[:20] if zafiyet.kategori else '-' }}</td>
+                        <td>{{ zafiyet.bulunan_tarih.strftime('%d.%m.%Y') if zafiyet.bulunan_tarih else '-' }}</td>
+                        <td>
+                            {% if zafiyet.url %}
+                            <a href="{{ zafiyet.url }}" target="_blank" class="btn-link">Detay</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="text-align: center; color: #888; padding: 20px;">Henüz CVE tanımlı zafiyet yok.</p>
+            {% endif %}
+        </div>
+        <div class="section">
+            <h2>CVE Tanımsız Zafiyetler (Son 10)</h2>
+            {% if cvesiz_zafiyetler %}
+            <table class="zafiyet-table">
+                <thead>
+                    <tr>
+                        <th>Kaynak</th>
+                        <th>Önem</th>
+                        <th>Başlık</th>
+                        <th>Yazılım</th>
+                        <th>Kategori</th>
+                        <th>Tarih</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for zafiyet in cvesiz_zafiyetler %}
+                    <tr>
+                        <td>
+                            {% if zafiyet.kaynak == 'GitHub' %}
+                            <span class="source-badge github">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                                </svg>
+                            </span>
+                            {% elif zafiyet.kaynak == 'Telegram' %}
+                            <span class="source-badge telegram">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM8.287 5.906c-.778.324-2.334.994-4.666 2.01-.378.15-.577.298-.595.442-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294.26.006.549-.1.868-.32 2.179-1.471 3.304-2.214 3.374-2.23.05-.012.12-.026.166.016.047.041.042.12.037.141-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8.154 8.154 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629.093.06.183.125.27.187.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.426 1.426 0 0 0-.013-.315.337.337 0 0 0-.114-.217.526.526 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09z"/>
+                                </svg>
+                            </span>
+                            {% else %}
+                            <span class="source-badge unknown">?</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'bilinmiyor' }}">
+                                {{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'Bilinmiyor' }}
+                            </span>
+                        </td>
+                        <td class="baslik-cell">{{ zafiyet.baslik[:40] }}{% if zafiyet.baslik|length > 40 %}...{% endif %}</td>
+                        <td>{{ zafiyet.etkilenen_yazilimlar[:20] if zafiyet.etkilenen_yazilimlar else '-' }}</td>
+                        <td>{{ zafiyet.kategori[:20] if zafiyet.kategori else '-' }}</td>
+                        <td>{{ zafiyet.bulunan_tarih.strftime('%d.%m.%Y') if zafiyet.bulunan_tarih else '-' }}</td>
+                        <td>
+                            {% if zafiyet.url %}
+                            <a href="{{ zafiyet.url }}" target="_blank" class="btn-link">Detay</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="text-align: center; color: #888; padding: 20px;">Henüz CVE tanımsız zafiyet yok.</p>
+            {% endif %}
+        </div>
+
+        <footer>
+            <p>Zafiyet Takip Sistemi | Veri kaynakları: GitHub Security Advisories, Telegram</p>
+            <p>Sistem Aktif - Gerçek Zamanlı İzleme</p>
+        </footer>
+    </div>
+
+    <script src="/statik/script.js"></script>
+    
+    <script>
+        
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        let heartbeatInterval = null;
+
+        function updateConnectionStatus(connected, message) {
+            const icon = document.getElementById('statusIcon');
+            const text = document.getElementById('statusText');
+            
+            if (connected) {
+                icon.textContent = '🟢';
+                icon.style.color = '#10b981';
+                text.textContent = message || 'Bağlı - Canlı İzleme Aktif';
+                text.style.color = '#10b981';
+                reconnectAttempts = 0;
+            } else {
+                icon.textContent = '🔴';
+                icon.style.color = '#ef4444';
+                text.textContent = message || 'Bağlantı Kopuk';
+                text.style.color = '#ef4444';
+            }
+        }
+
+        function updateStats(data) {
+           
+            document.querySelector('.stat-card.toplam .stat-number').textContent = data.toplam;
+            document.querySelector('.stat-card.kritik .stat-number').textContent = data.kritik;
+            document.querySelector('.stat-card.yuksek .stat-number').textContent = data.yuksek;
+            document.querySelector('.stat-card.orta .stat-number').textContent = data.orta;
+            document.querySelector('.stat-card.dusuk .stat-number').textContent = data.dusuk;
+            
+           
+            const son7gunFooter = document.querySelector('.stat-card.toplam .stat-footer');
+            if (son7gunFooter) {
+                son7gunFooter.textContent = `Son 7 gün: ${data.son_7_gun}`;
+            }
+            
+            
+            const now = new Date().toLocaleTimeString('tr-TR');
+            document.getElementById('lastUpdate').textContent = `Son güncelleme: ${now}`;
+        }
+
+        function showNotification(latest) {
+           
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 80px;
+                right: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 20px 25px;
+                border-radius: 12px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                z-index: 9999;
+                max-width: 400px;
+                animation: slideIn 0.4s ease;
+                border: 2px solid rgba(255,255,255,0.2);
+            `;
+            
+            
+            let oemColor = '#10b981';
+            if (latest.onem === 'KRITIK') oemColor = '#ef4444';
+            else if (latest.onem === 'YUKSEK') oemColor = '#f59e0b';
+            else if (latest.onem === 'ORTA') oemColor = '#3b82f6';
+            
+            toast.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                    <span style="font-size: 24px;"></span>
+                    <strong style="font-size: 16px;">Yeni Zafiyet!</strong>
+                </div>
+                <div style="font-size: 14px; line-height: 1.5; margin-bottom: 10px;">
+                    ${latest.baslik}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; opacity: 0.9;">
+                    <span style="background: rgba(255,255,255,0.2); padding: 4px 8px; border-radius: 4px;">
+                        ${latest.kaynak}
+                    </span>
+                    <span style="background: ${oemColor}; padding: 4px 8px; border-radius: 4px; font-weight: 600;">
+                        ${latest.onem}
+                    </span>
+                </div>
+            `;
+            
+            document.body.appendChild(toast);
+            
+           
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.4s ease';
+                setTimeout(() => toast.remove(), 400);
+            }, 5000);
+        }
+
+        function connectWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                return;
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            
+            updateConnectionStatus(false, 'Bağlanıyor...');
+            
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                console.log(' WebSocket bağlantısı kuruldu');
+                updateConnectionStatus(true);
+                
+                
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                heartbeatInterval = setInterval(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send('ping');
+                    }
+                }, 30000); 
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log(' Mesaj alındı:', data.type);
+
+                if (data.type === 'initial_stats') {
+                    
+                    updateStats(data.data);
+                    console.log(' İlk istatistikler yüklendi');
+                }
+                else if (data.type === 'new_vulnerability') {
+                    
+                    updateStats(data.data);
+                    showNotification(data.data.latest);
+                    console.log(` ${data.data.new_count} yeni zafiyet eklendi`);
+                }
+                else if (data.type === 'pong') {
+                    console.log('Heartbeat OK');
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error(' WebSocket hatası:', error);
+                updateConnectionStatus(false, 'Bağlantı hatası');
+            };
+
+            ws.onclose = function() {
+                console.log(' WebSocket bağlantısı kapandı');
+                updateConnectionStatus(false, 'Bağlantı koptu');
+                
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = null;
+                }
+
+               
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    console.log(` ${delay/1000}s sonra yeniden bağlanılacak (${reconnectAttempts}/${maxReconnectAttempts})`);
+                    updateConnectionStatus(false, `${delay/1000}s sonra tekrar denenecek...`);
+                    setTimeout(connectWebSocket, delay);
+                } else {
+                    updateConnectionStatus(false, 'Bağlantı başarısız - Sayfayı yenileyin');
+                }
+            };
+        }
+
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            const chartScript = document.createElement('script');
+            chartScript.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+            chartScript.onload = function() {
+            console.log('Chart.js yüklendi');
+            fetch('/api/kategori-grafik')
+                .then(response => response.json())
+                .then(data => {
+                    const ctx = document.getElementById('kategoriChart').getContext('2d');
+                    
+                    const colors = [
+                        '#667eea', '#764ba2', '#f093fb', '#4facfe',
+                        '#43e97b', '#fa709a', '#fee140', '#30cfd0',
+                        '#a8edea', '#fed6e3'
+                    ];
+                    
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                data: data.values,
+                                backgroundColor: colors.slice(0, data.labels.length),
+                                borderWidth: 2,
+                                borderColor: '#1a1a2e'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#e0e0e0',
+                                        padding: 15,
+                                        font: { size: 11 }
+                                    }
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const label = context.label || '';
+                                            const value = context.parsed;
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = ((value / total) * 100).toFixed(1);
+                                            return `${label}: ${value} (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    console.log(' Kategori grafiği oluşturuldu');
+                })
+                .catch(err => console.error('Kategori grafiği hatası:', err));
+
+           
+            fetch('/api/onem-grafik')
+                .then(response => response.json())
+                .then(data => {
+                    const ctx = document.getElementById('onemChart').getContext('2d');
+                    
+                    new Chart(ctx, {
+                        type: 'pie',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                data: data.values,
+                                backgroundColor: data.colors,
+                                borderWidth: 2,
+                                borderColor: '#1a1a2e'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#e0e0e0',
+                                        padding: 15,
+                                        font: { size: 12 }
+                                    }
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const label = context.label || '';
+                                            const value = context.parsed;
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = ((value / total) * 100).toFixed(1);
+                                            return `${label}: ${value} (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        });
+                    console.log(' Önem grafiği oluşturuldu');
+                })
+                .catch(err => console.error('Önem grafiği hatası:', err));
+        };
+        document.head.appendChild(chartScript);
+
+
+            console.log('WebSocket başlatılıyor...');
+
+            connectWebSocket();
+        });
+
+        
+        window.addEventListener('beforeunload', () => {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            if (ws) ws.close();
+        });
+    </script>
+
+    <style>
+        @keyframes slideIn {
+            from { 
+                transform: translateX(400px); 
+                opacity: 0; 
+            }
+            to { 
+                transform: translateX(0); 
+                opacity: 1; 
+            }
+        }
+        @keyframes slideOut {
+            from { 
+                transform: translateX(0); 
+                opacity: 1; 
+            }
+            to { 
+                transform: translateX(400px); 
+                opacity: 0; 
+            }
+        }
+    </style>
+</body>
+</html>
