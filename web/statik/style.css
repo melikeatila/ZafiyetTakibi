@@ -154,6 +154,57 @@ header p {
     font-size: 1.5rem;
 }
 
+.remote-alarm-section {
+    border: 1px solid #7f1d1d;
+    background: radial-gradient(circle at top right, rgba(127, 29, 29, 0.35), var(--bg-card) 45%);
+    box-shadow: inset 0 0 0 1px rgba(220, 38, 38, 0.25), 0 0 0 1px rgba(220, 38, 38, 0.1);
+}
+
+.remote-alarm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.remote-alarm-header h2 {
+    color: #fecaca;
+    margin-bottom: 0;
+    letter-spacing: 0.3px;
+}
+
+.remote-alarm-count {
+    background: #dc2626;
+    color: #fff;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    animation: alarmPulse 1.8s ease-in-out infinite;
+}
+
+.remote-alarm-subtitle {
+    color: #fca5a5;
+    margin-bottom: 28px;
+    font-size: 0.95rem;
+}
+
+.remote-alarm-table {
+    border: 1px solid #7f1d1d;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.remote-alarm-table thead th {
+    background: #3f1010;
+    color: #fecaca;
+}
+
+.remote-alarm-table tbody tr:hover {
+    background: rgba(153, 27, 27, 0.28);
+}
+
 /* ── TREND GRID ───────────────────────────────────────────── */
 .trend-grid {
     display: grid;
@@ -561,6 +612,11 @@ footer p { margin: 5px 0; }
     header h1  { font-size: 2rem; }
     .stat-card { padding: 20px; }
     .stat-number { font-size: 2.5rem; }
+
+    .remote-alarm-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
 }
 
 @media (max-width: 480px) {
@@ -577,4 +633,16 @@ footer p { margin: 5px 0; }
     .source-badge svg   { width: 12px; height: 12px; }
 
     .trend-card { min-height: unset; }
+}
+
+@keyframes alarmPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(220, 38, 38, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+    }
 }

@@ -140,11 +140,11 @@ class RaporOlusturucu:
         try:
             trend_metni = ""
             for i, t in enumerate(veri['trend_zafiyetler'][:5], 1):
-                trend_metni += f"{i}. {t['baslik'][:80]} ({t['onem_derecesi_value']}) - {t['adet']} kez\n"  # ✅ EKLENDİ
+                trend_metni += f"{i}. {t['baslik'][:80]} ({t['onem_derecesi_value']}) - {t['adet']} kez\n"  # 
 
             kategori_metni = ""
             for k in veri['kategoriler']:
-                kategori_metni += f"- {k['kategori']}: {k['adet']} adet\n"  # ✅ EKLENDİ
+                kategori_metni += f"- {k['kategori']}: {k['adet']} adet\n"  
 
 
             prompt = f"""Aşağıdaki haftalık siber güvenlik zafiyet verilerini analiz et ve Türkçe profesyonel bir özet yaz.
@@ -345,7 +345,7 @@ Profesyonel, net ve anlaşılır bir dil kullan."""
         <div style="background:#1a1a2e; border:1px solid #2a2a4e; border-radius:12px;
                     padding:25px; margin-bottom:30px;">
             <h2 style="color:#00d4ff; margin:0 0 20px; font-size:1.2rem;">
-                 Bu Hafta En Çok Konuşulanlar
+                 AI analizi sonucu Haftanın Top 10 Zafiyetleri
             </h2>
             <table width="100%" cellpadding="0" cellspacing="0">
                 <thead>

@@ -34,6 +34,10 @@ os.makedirs(REPORTS_DIR, exist_ok=True)
 
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+REMOTE_PATTERN = re.compile(
+    r"\b(remote|rce|uzaktan|remote code execution|command injection|auth(entication)? bypass)\b",
+    re.IGNORECASE,
+)
 
 if not os.path.exists(STATIC_DIR):
     raise FileNotFoundError(f" Static klasörü bulunamadı: {STATIC_DIR}")
@@ -137,6 +141,19 @@ def cve_numarasi_bul(zafiyet):
     return None
 
 
+def remote_zafiyet_mi(zafiyet) -> bool:
+    alanlar = [
+        zafiyet.baslik,
+        zafiyet.aciklama,
+        zafiyet.kategori,
+        zafiyet.etkilenen_yazilimlar,
+    ]
+    metin = " ".join([str(a) for a in alanlar if a])
+    if not metin:
+        return False
+    return bool(REMOTE_PATTERN.search(metin))
+
+
 def _guvenli_rapor_yolu(dosya_adi: str) -> str | None:
     safe_name = os.path.basename(dosya_adi)
     if safe_name != dosya_adi or not safe_name.lower().endswith(".html"):
@@ -176,6 +193,7 @@ async def anasayfa(request: Request):
         cve_yok_sayisi = 0
         cve_zafiyetler_liste = []
         cvesiz_zafiyetler_liste = []
+        remote_kritik_zafiyetler = []
 
         for zafiyet in tum_zafiyetler:
             has_cve = (
@@ -191,19 +209,13 @@ async def anasayfa(request: Request):
                 cve_yok_sayisi += 1
                 cvesiz_zafiyetler_liste.append(zafiyet)
 
-        
+            if zafiyet.onem_derecesi == OnemDerecesi.KRITIK and remote_zafiyet_mi(zafiyet):
+                zafiyet.extracted_cve = cve_numarasi_bul(zafiyet)
+                remote_kritik_zafiyetler.append(zafiyet)
 
-        def dengeli_sec(liste, limit=10):
-            gh = [z for z in liste if (z.kaynak or "").lower() == "github"][: limit // 2]
-            tg = [z for z in liste if (z.kaynak or "").lower() == "telegram"][: limit // 2]
-            kalan = limit - (len(gh) + len(tg))
-            diger = [z for z in liste if (z.kaynak or "").lower() not in ("github", "telegram")][:kalan]
-            secili = gh + tg + diger
-            secili.sort(key=lambda z: z.bulunan_tarih or datetime.min, reverse=True)
-            return secili[:limit]
-
-        cve_zafiyetler = dengeli_sec(cve_zafiyetler_liste, 10)
-        cvesiz_zafiyetler = dengeli_sec(cvesiz_zafiyetler_liste, 10)
+        cve_zafiyetler = cve_zafiyetler_liste[:100]
+        cvesiz_zafiyetler = cvesiz_zafiyetler_liste[:100]
+        remote_kritik_zafiyetler = remote_kritik_zafiyetler[:20]
 
 
         github_sayisi = q.filter(Zafiyet.kaynak == "GitHub").count()
@@ -293,6 +305,8 @@ async def anasayfa(request: Request):
             "telegram_sayisi": telegram_sayisi,
             "cve_zafiyetler": cve_zafiyetler,
             "cvesiz_zafiyetler": cvesiz_zafiyetler,
+            "remote_kritik_zafiyetler": remote_kritik_zafiyetler,
+            "remote_kritik_sayisi": len(remote_kritik_zafiyetler),
             "trend_zafiyetler": trend_zafiyetler,
             "son_7_gun": son_7_gun,
             "kategoriler": kategoriler
