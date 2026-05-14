@@ -87,6 +87,18 @@
                 <div class="stat-label">Telegram</div>
                 <div class="stat-footer">Anlık bildirimler</div>
             </div>
+
+            <div class="stat-card kaynak-exploitdb">
+                <div class="stat-number">{{ exploit_db_sayisi }}</div>
+                <div class="stat-label">Exploit-DB</div>
+                <div class="stat-footer">Exploit kaynağı</div>
+            </div>
+
+            <div class="stat-card kaynak-zeday">
+                <div class="stat-number">{{ zeday_sayisi }}</div>
+                <div class="stat-label">0day.today</div>
+                <div class="stat-footer">0-Day kaynak</div>
+            </div>
         </div>
 
         <div class="section remote-alarm-section">
@@ -111,8 +123,28 @@
                 </thead>
                 <tbody>
                     {% for zafiyet in remote_kritik_zafiyetler %}
-                    <tr>
-                        <td>{{ zafiyet.kaynak or '-' }}</td>
+                    <tr class="severity-row sev-kritik">
+                        <td>
+                            {% if zafiyet.kaynak == 'GitHub' %}
+                            <span class="source-badge github">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                                </svg>
+                            </span>
+                            {% elif zafiyet.kaynak == 'Telegram' %}
+                            <span class="source-badge telegram">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM8.287 5.906c-.778.324-2.334.994-4.666 2.01-.378.15-.577.298-.595.442-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294.26.006.549-.1.868-.32 2.179-1.471 3.304-2.214 3.374-2.23.05-.012.12-.026.166.016.047.041.042.12.037.141-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8.154 8.154 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629.093.06.183.125.27.187.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.426 1.426 0 0 0-.013-.315.337.337 0 0 0-.114-.217.526.526 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09z"/>
+                                </svg>
+                            </span>
+                            {% elif zafiyet.kaynak == 'Exploit-DB' %}
+                            <span class="source-badge unknown" style="background:#ff5722; color:white; font-weight:bold;">Exploit-DB</span>
+                            {% elif zafiyet.kaynak == '0day.today' %}
+                            <span class="source-badge unknown" style="background:#9c27b0; color:white; font-weight:bold;">0-Day</span>
+                            {% else %}
+                            <span class="source-badge unknown">{{ zafiyet.kaynak or '?' }}</span>
+                            {% endif %}
+                        </td>
                         <td>
                             {% if zafiyet.extracted_cve %}
                             <strong class="cve-badge">{{ zafiyet.extracted_cve }}</strong>
@@ -120,7 +152,15 @@
                             <span class="cve-badge" style="background: #6b7280;">CVE Yok</span>
                             {% endif %}
                         </td>
-                        <td class="baslik-cell">{{ zafiyet.baslik[:70] }}{% if zafiyet.baslik|length > 70 %}...{% endif %}</td>
+                        <td class="baslik-cell">
+                            {% if zafiyet.url %}
+                            <a href="{{ zafiyet.url }}" target="_blank" style="text-decoration:none; color:inherit; font-weight:600;">
+                                {{ zafiyet.baslik }}
+                            </a>
+                            {% else %}
+                                {{ zafiyet.baslik }}
+                            {% endif %}
+                        </td>
                         <td>{{ zafiyet.kategori[:25] if zafiyet.kategori else '-' }}</td>
                         <td>{{ zafiyet.bulunan_tarih.strftime('%d.%m.%Y %H:%M') if zafiyet.bulunan_tarih else '-' }}</td>
                         <td>
@@ -136,6 +176,73 @@
             <p style="text-align:center; color:#fca5a5; padding: 10px 0 0 0;">Şu an alarm seviyesinde remote kritik zafiyet bulunmuyor.</p>
             {% endif %}
         </div>
+
+<div class="section">
+            <h2>📦 Dependency Analizi</h2>
+            
+            <div style="margin-bottom: 30px; background: linear-gradient(135deg, #667eea15, #764ba215); padding: 20px; border-radius: 12px; border-left: 4px solid #667eea;">
+                <p style="color: #888; margin: 0; font-size: 14px;">
+                    Zafiyet açıklamalarından otomatik olarak npm packages, Python libraries, Java frameworks ve diğer dependency'leri çıkartılmaktadır.
+                </p>
+            </div>
+
+            <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 30px;">
+                <div class="stat-card" style="background: linear-gradient(135deg, #667eea, #764ba2);">
+                    <div class="stat-number" id="dep-toplam">-</div>
+                    <div class="stat-label">Toplam Eşsiz Dependency</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #f093fb, #f5576c);">
+                    <div class="stat-number" id="dep-npm">-</div>
+                    <div class="stat-label">npm Paketleri</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #4facfe, #00f2fe);">
+                    <div class="stat-number" id="dep-python">-</div>
+                    <div class="stat-label">Python Paketleri</div>
+                </div>
+                <div class="stat-card" style="background: linear-gradient(135deg, #43e97b, #38f9d7);">
+                    <div class="stat-number" id="dep-java">-</div>
+                    <div class="stat-label">Java Kütüphaneleri</div>
+                </div>
+            </div>
+
+            <h3 style="margin-top: 30px; margin-bottom: 20px;">🔴 En Riskli 10 Dependency</h3>
+            <div id="top-deps" style="overflow-x: auto;">
+                <table class="zafiyet-table" style="margin: 0;">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Paket Adı</th>
+                            <th>Tür</th>
+                            <th>Zafiyet</th>
+                            <th>Max Severity</th>
+                            <th>CVE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="top-deps-body">
+                        <tr><td colspan="6" style="text-align: center; color: #888;">Yükleniyor...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 style="margin-top: 30px; margin-bottom: 20px;">🔍 Dependency Ara</h3>
+            <div class="filter-form" style="margin-bottom: 20px;">
+                <input type="text" id="dep-search" placeholder="Paket adı ara (ör: axios, django, spring-core)..." style="flex: 1;">
+                <select id="dep-type-filter" style="padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; cursor: pointer;">
+                    <option value="">Tüm Türler</option>
+                    <option value="npm">npm</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="php">PHP</option>
+                    <option value="dotnet">.NET</option>
+                </select>
+                <button onclick="searchDependency()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">Ara</button>
+            </div>
+            <div id="dep-search-results" style="display: none;"></div>
+
+        </div>
+
+
         
 <section class="section">
     <h2> Trend Zafiyetler (Son 7 Gün)</h2>
@@ -170,8 +277,12 @@
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
                 </svg>
                 Telegram
+            {% elif kaynak == 'exploit-db' %}
+                <span style="background:#ff5722; color:white; font-weight:bold; padding: 2px 6px; border-radius: 3px; display: inline-block;">Exploit-DB</span>
+            {% elif kaynak == '0day.today' %}
+                <span style="background:#9c27b0; color:white; font-weight:bold; padding: 2px 6px; border-radius: 3px; display: inline-block;">0-Day</span>
             {% else %}
-                {{ trend.kaynak or 'Kaynak' }}
+                <span style="display: inline-block;">{{ trend.kaynak or 'Kaynak' }}</span>
             {% endif %}
         </span>
             
@@ -268,7 +379,19 @@
                 </thead>
                 <tbody>
                     {% for zafiyet in cvesiz_zafiyetler %}
-                    <tr>
+                    {% set onem_raw = (zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else '')|upper %}
+                    {% if 'KRİTİK' in onem_raw or 'KRITIK' in onem_raw %}
+                        {% set onem_class = 'kritik' %}
+                    {% elif 'YÜKSEK' in onem_raw or 'YUKSEK' in onem_raw %}
+                        {% set onem_class = 'yuksek' %}
+                    {% elif 'ORTA' in onem_raw %}
+                        {% set onem_class = 'orta' %}
+                    {% elif 'DÜŞÜK' in onem_raw or 'DUSUK' in onem_raw %}
+                        {% set onem_class = 'dusuk' %}
+                    {% else %}
+                        {% set onem_class = 'bilinmiyor' %}
+                    {% endif %}
+                    <tr class="severity-row sev-{{ onem_class }}">
                         <td>
                             {% if zafiyet.kaynak == 'GitHub' %}
                             <span class="source-badge github">
@@ -282,12 +405,16 @@
                                     <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM8.287 5.906c-.778.324-2.334.994-4.666 2.01-.378.15-.577.298-.595.442-.03.243.275.339.69.47l.175.055c.408.133.958.288 1.243.294.26.006.549-.1.868-.32 2.179-1.471 3.304-2.214 3.374-2.23.05-.012.12-.026.166.016.047.041.042.12.037.141-.03.129-1.227 1.241-1.846 1.817-.193.18-.33.307-.358.336a8.154 8.154 0 0 1-.188.186c-.38.366-.664.64.015 1.088.327.216.589.393.85.571.284.194.568.387.936.629.093.06.183.125.27.187.331.236.63.448.997.414.214-.02.435-.22.547-.82.265-1.417.786-4.486.906-5.751a1.426 1.426 0 0 0-.013-.315.337.337 0 0 0-.114-.217.526.526 0 0 0-.31-.093c-.3.005-.763.166-2.984 1.09z"/>
                                 </svg>
                             </span>
+                            {% elif zafiyet.kaynak == 'Exploit-DB' %}
+                            <span class="source-badge unknown" style="background:#ff5722; color:white; font-weight:bold;">Exploit-DB</span>
+                            {% elif zafiyet.kaynak == '0day.today' %}
+                            <span class="source-badge unknown" style="background:#9c27b0; color:white; font-weight:bold;">0-Day</span>
                             {% else %}
-                            <span class="source-badge unknown">?</span>
+                            <span class="source-badge unknown">{{ zafiyet.kaynak or '?' }}</span>
                             {% endif %}
                         </td>
                         <td>
-                            <span class="badge badge-{{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'bilinmiyor' }}">
+                            <span class="badge badge-{{ onem_class }}">
                                 {{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'Bilinmiyor' }}
                             </span>
                         </td>
@@ -309,6 +436,8 @@
             {% endif %}
         </div>
 
+        
+
         <div class="section">
             <h2>CVE Tanımlı Zafiyetler (Son 100)</h2>
             {% if cve_zafiyetler %}
@@ -327,7 +456,19 @@
                 </thead>
                 <tbody>
                     {% for zafiyet in cve_zafiyetler %}
-                    <tr>
+                    {% set onem_raw = (zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else '')|upper %}
+                    {% if 'KRİTİK' in onem_raw or 'KRITIK' in onem_raw %}
+                        {% set onem_class = 'kritik' %}
+                    {% elif 'YÜKSEK' in onem_raw or 'YUKSEK' in onem_raw %}
+                        {% set onem_class = 'yuksek' %}
+                    {% elif 'ORTA' in onem_raw %}
+                        {% set onem_class = 'orta' %}
+                    {% elif 'DÜŞÜK' in onem_raw or 'DUSUK' in onem_raw %}
+                        {% set onem_class = 'dusuk' %}
+                    {% else %}
+                        {% set onem_class = 'bilinmiyor' %}
+                    {% endif %}
+                    <tr class="severity-row sev-{{ onem_class }}">
                         <td>
                             {% if zafiyet.kaynak == 'GitHub' %}
                             <span class="source-badge github">
@@ -355,11 +496,19 @@
                             {% endif %}
                         </td>
                         <td>
-                            <span class="badge badge-{{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'bilinmiyor' }}">
+                            <span class="badge badge-{{ onem_class }}">
                                 {{ zafiyet.onem_derecesi.value if zafiyet.onem_derecesi else 'Bilinmiyor' }}
                             </span>
                         </td>
-                        <td class="baslik-cell">{{ zafiyet.baslik[:40] }}{% if zafiyet.baslik|length > 40 %}...{% endif %}</td>
+                        <td class="baslik-cell">
+                            {% if zafiyet.url %}
+                            <a href="{{ zafiyet.url }}" target="_blank" style="text-decoration:none; color:inherit; font-weight:600;">
+                                {{ zafiyet.baslik }}
+                            </a>
+                            {% else %}
+                                {{ zafiyet.baslik }}
+                            {% endif %}
+                        </td>
                         <td>{{ zafiyet.etkilenen_yazilimlar[:20] if zafiyet.etkilenen_yazilimlar else '-' }}</td>
                         <td>{{ zafiyet.kategori[:20] if zafiyet.kategori else '-' }}</td>
                         <td>{{ zafiyet.bulunan_tarih.strftime('%d.%m.%Y') if zafiyet.bulunan_tarih else '-' }}</td>

@@ -26,7 +26,7 @@ class Zafiyet(Base):
     baslik = Column(String(500), nullable=False)
     aciklama = Column(Text, nullable=False)
     kaynak = Column(String(50), nullable=False)  
-    url = Column(String(1000), nullable=False)
+    url = Column(String(1000), nullable=True)  # nullable: Exploit-DB, 0day.today gibi kaynaklar URL sağlamayabilir
     bulunan_tarih = Column(DateTime, default=datetime.utcnow)
     onem_derecesi = Column(Enum(OnemDerecesi), nullable=True)
     durum = Column(Enum(ZafiyetDurumu), default=ZafiyetDurumu.YENI)

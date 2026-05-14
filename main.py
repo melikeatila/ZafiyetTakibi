@@ -13,9 +13,12 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from toplayicilar.github_toplayici import GithubToplayici
 from toplayicilar.telegram_toplayici import TelegramToplayici
+from toplayicilar.exploit_db_toplayici import ExploitDBCollector
+from toplayicilar.zerotday_toplayici import ZeroDayTodayCollector
+from toplayicilar.ghdb_toplayici import GHDBCollector
 from yapay_zeka.analiz import ZafiyetAnalizci
 from raporlama.mail_gonder import MailGonderici
-from veritabani.baglanti import session_al
+from veritabani.baglanti import session_al, veritabanini_hazirla
 from modeller.zafiyet import Zafiyet
 
 load_dotenv()
@@ -151,6 +154,7 @@ def veri_topla():
     log_yazdir(" Veri toplama başladı...")
     toplam_yeni = 0
 
+    # GitHub
     try:
         gh = GithubToplayici()
         gh_veriler = gh.tum_verileri_topla(saat=SETTINGS["github_lookback_hours"])
@@ -160,6 +164,7 @@ def veri_topla():
     except Exception as e:
         log_yazdir(f" GitHub toplama hatası: {e}")
 
+    # Telegram
     try:
         t, tg_veriler = _telegram_sync_topla(SETTINGS["telegram_lookback_hours"])
         tg_yeni = t.veritabanina_kaydet(tg_veriler)
@@ -167,6 +172,104 @@ def veri_topla():
         log_yazdir(f" Telegram yeni kayıt: {tg_yeni}")
     except Exception as e:
         log_yazdir(f" Telegram toplama hatası: {e}")
+
+    # Exploit-DB
+    if env_str("EXPLOIT_DB_ENABLED", "true").lower() == "true":
+        try:
+            edb = ExploitDBCollector()
+            edb_veriler = edb.get_latest_from_rss(limit=env_int("EXPLOIT_DB_LIMIT", 50))
+            if edb_veriler:
+                from veritabani.baglanti import SessionLocal
+                db = SessionLocal()
+                for veri in edb_veriler:
+                    try:
+                        existing = db.query(Zafiyet).filter_by(baslik=veri.get("title", "")).first()
+                        if not existing:
+                            z = Zafiyet(
+                                baslik=veri.get("title", ""),
+                                aciklama=veri.get("description", ""),
+                                kaynak="Exploit-DB",
+                                url=veri.get("link", veri.get("url", "")),
+                                cve_numarasi=veri.get("cve", ""),
+                                onem_derecesi="ORTA",
+                                kategori="Exploit",
+                                etkilenen_yazilimlar=""
+                            )
+                            db.add(z)
+                    except:
+                        pass
+                db.commit()
+                db.close()
+                edb_yeni = len(edb_veriler)
+                toplam_yeni += edb_yeni
+                log_yazdir(f" Exploit-DB yeni kayıt: {edb_yeni}")
+        except Exception as e:
+            log_yazdir(f" Exploit-DB toplama hatası: {e}")
+
+    # 0day.today
+    if env_str("ZERODAY_ENABLED", "true").lower() == "true":
+        try:
+            zday = ZeroDayTodayCollector()
+            zday_veriler = zday.get_latest_from_rss(limit=env_int("ZERODAY_LIMIT", 30))
+            if zday_veriler:
+                from veritabani.baglanti import SessionLocal
+                db = SessionLocal()
+                for veri in zday_veriler:
+                    try:
+                        existing = db.query(Zafiyet).filter_by(baslik=veri.get("title", "")).first()
+                        if not existing:
+                            z = Zafiyet(
+                                baslik=veri.get("title", ""),
+                                aciklama=veri.get("description", ""),
+                                kaynak="0day.today",
+                                url=veri.get("url", veri.get("link", "")),
+                                cve_numarasi=veri.get("cve", ""),
+                                onem_derecesi="YUKSEK",
+                                kategori="0-Day",
+                                etkilenen_yazilimlar=""
+                            )
+                            db.add(z)
+                    except:
+                        pass
+                db.commit()
+                db.close()
+                zday_yeni = len(zday_veriler)
+                toplam_yeni += zday_yeni
+                log_yazdir(f" 0day.today yeni kayıt: {zday_yeni}")
+        except Exception as e:
+            log_yazdir(f" 0day.today toplama hatası: {e}")
+
+    # Google Hacking DB
+    if env_str("GHDB_ENABLED", "true").lower() == "true":
+        try:
+            ghdb = GHDBCollector()
+            ghdb_veriler = ghdb.get_latest_from_rss(limit=env_int("GHDB_LIMIT", 40))
+            if ghdb_veriler:
+                from veritabani.baglanti import SessionLocal
+                db = SessionLocal()
+                for veri in ghdb_veriler:
+                    try:
+                        existing = db.query(Zafiyet).filter_by(baslik=veri.get("title", "")).first()
+                        if not existing:
+                            z = Zafiyet(
+                                baslik=veri.get("title", ""),
+                                aciklama=veri.get("description", "") or veri.get("dork", ""),
+                                kaynak="Google Hacking DB",
+                                cve_numarasi="",
+                                onem_derecesi="ORTA",
+                                kategori="GHDB",
+                                etkilenen_yazilimlar=""
+                            )
+                            db.add(z)
+                    except:
+                        pass
+                db.commit()
+                db.close()
+                ghdb_yeni = len(ghdb_veriler)
+                toplam_yeni += ghdb_yeni
+                log_yazdir(f" GHDB yeni kayıt: {ghdb_yeni}")
+        except Exception as e:
+            log_yazdir(f" GHDB toplama hatası: {e}")
 
     log_yazdir(f" Veri toplama tamamlandı. Toplam yeni: {toplam_yeni}")
 
@@ -188,6 +291,9 @@ def haftalik_rapor_gonder():
 
 def ana_dongu():
     log_yazdir(" Worker başlatıldı")
+    
+    # Veritabanını hazırla (tablolar oluştur)
+    veritabanini_hazirla()
 
     schedule.every(SETTINGS["collect_interval_minutes"]).minutes.do(
         lambda: _guarded("veri_topla", veri_topla)

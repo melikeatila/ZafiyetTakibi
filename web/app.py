@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, and_
 
@@ -38,6 +39,8 @@ REMOTE_PATTERN = re.compile(
     r"\b(remote|rce|uzaktan|remote code execution|command injection|auth(entication)? bypass)\b",
     re.IGNORECASE,
 )
+ANLAMSIZ_TREND_ETIKETLERI = {"diger", "bilinmiyor", "unknown", "genel"}
+PINLI_TREND_TERIMLERI = ("litellm",)
 
 if not os.path.exists(STATIC_DIR):
     raise FileNotFoundError(f" Static klasörü bulunamadı: {STATIC_DIR}")
@@ -46,6 +49,15 @@ if not os.path.exists(TEMPLATE_DIR):
 
 app.mount("/statik", StaticFiles(directory=STATIC_DIR), name="statik")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
+
+# === CORS Setup ===
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Tüm origin'lere izin ver
+    allow_credentials=True,
+    allow_methods=["*"],  # GET, POST, PUT, DELETE, etc.
+    allow_headers=["*"],  # Tüm headerları kabul et
+)
 
 _monitor_task = None
 
@@ -111,6 +123,26 @@ class RaporGonderModel(BaseModel):
     konu: str | None = None
 
 
+class DependencyModel(BaseModel):
+    """Dependency/Paket Modeli"""
+    ad: str
+    version: str | None = None
+    tur: str  # npm, python, java, ruby, php, dotnet, diğer
+    adet: int = 1  # Kaç zafiyette kullanıldığı
+    max_severity: str | None = None  # En yüksek önem derecesi
+    cve_list: List[str] | None = None  # İlişkili CVE'ler
+    zafiyetler: List[dict] | None = None  # Zafiyet özeti
+
+
+class DependenciesResponseModel(BaseModel):
+    """API Yanıtı"""
+    toplam: int
+    kaynaklar: dict  # Kaynak türüne göre gruplama
+    dependencies: List[DependencyModel]
+    en_risk_li: List[DependencyModel] | None = None
+    son_guncelleme: datetime
+
+
 @app.on_event("startup")
 async def startup_event():
     global _monitor_task
@@ -152,6 +184,246 @@ def remote_zafiyet_mi(zafiyet) -> bool:
     if not metin:
         return False
     return bool(REMOTE_PATTERN.search(metin))
+
+
+def _anahtar_kelime_bul(baslik: str) -> str:
+    metin = (baslik or "").lower()
+    metin = re.sub(r"cve-\d{4}-\d{4,7}", " ", metin, flags=re.IGNORECASE)
+
+    adaylar = re.findall(r"[a-z0-9][a-z0-9+._-]{2,}", metin)
+    stop = {
+        "vulnerability", "security", "advisory", "update", "patch", "bug",
+        "issue", "critical", "high", "medium", "low", "remote", "code",
+        "execution", "rce", "xss", "sql", "injection", "disclosure",
+        "dos", "bypass", "overflow", "exploit", "auth", "authentication",
+        "zafiyet", "guvenlik", "açığı", "acigi", "kritik", "yuksek", "orta", "dusuk",
+        "new", "latest", "breaking", "alert", "the", "this", "that", "popular", "malicious"
+    }
+    for t in adaylar:
+        if t.isdigit():
+            continue
+        if not re.search(r"[a-z]", t):
+            continue
+        if t not in stop:
+            return t
+    return "diger"
+
+
+def _urun_etiketi_bul(zafiyet) -> str:
+    yazilim = (zafiyet.etkilenen_yazilimlar or "").strip().lower()
+    if yazilim and yazilim not in {"-", "bilinmiyor", "unknown"}:
+        aday = re.split(r"[,/|;]", yazilim, maxsplit=1)[0].strip()
+        aday = re.sub(r"\s+", " ", aday)
+        aday = re.sub(r"\b(v\d+[\w.-]*|\d+[\w.-]*)\b", "", aday).strip()
+        if len(aday) >= 3 and re.search(r"[a-z]", aday):
+            return aday
+
+    metin = " ".join([
+        zafiyet.baslik or "",
+        zafiyet.aciklama or "",
+        zafiyet.kategori or "",
+        zafiyet.url or "",
+    ]).lower()
+
+    for terim in PINLI_TREND_TERIMLERI:
+        if re.search(rf"\b{re.escape(terim)}\b", metin):
+            return terim
+
+    return _anahtar_kelime_bul(zafiyet.baslik or "")
+
+
+def _trend_sirala(trend_gruplari: dict, limit: int = 10) -> list:
+    sirali = sorted(
+        trend_gruplari.values(),
+        key=lambda x: (x["adet"], x["son_tarih"] or datetime.min),
+        reverse=True,
+    )
+
+    anlamli = [
+        g for g in sirali
+        if (g.get("grup_etiketi") or "").strip().lower() not in ANLAMSIZ_TREND_ETIKETLERI
+    ]
+    secilen = anlamli[:limit]
+
+    if len(secilen) < limit:
+        secili_anahtarlar = {s.get("anahtar") for s in secilen}
+        for aday in sirali:
+            if len(secilen) >= limit:
+                break
+            if aday.get("anahtar") in secili_anahtarlar:
+                continue
+            secilen.append(aday)
+            secili_anahtarlar.add(aday.get("anahtar"))
+
+    secili_anahtarlar = {s.get("anahtar") for s in secilen}
+    for terim in PINLI_TREND_TERIMLERI:
+        aday = next(
+            (
+                g for g in sirali
+                if terim in (g.get("grup_etiketi") or "").lower()
+                or terim in (g.get("yazilim") or "").lower()
+                or terim in (g.get("baslik") or "").lower()
+            ),
+            None,
+        )
+        if not aday or aday.get("anahtar") in secili_anahtarlar:
+            continue
+        if len(secilen) < limit:
+            secilen.append(aday)
+        else:
+            secilen[-1] = aday
+        secili_anahtarlar = {s.get("anahtar") for s in secilen}
+
+    return secilen
+
+
+def _onem_sira(onem) -> int:
+    if onem == OnemDerecesi.KRITIK:
+        return 5
+    elif onem == OnemDerecesi.YUKSEK:
+        return 4
+    elif onem == OnemDerecesi.ORTA:
+        return 3
+    elif onem == OnemDerecesi.DUSUK:
+        return 2
+    elif onem == OnemDerecesi.BILGI:
+        return 1
+    return 0
+
+
+# ============= DEPENDENCY EXTRACTION =============
+def extract_dependencies(metin: str) -> List[dict]:
+    """Zafiyetlerden dependency'leri çıkart"""
+    if not metin:
+        return []
+    
+    dependencies = []
+    metin_lower = metin.lower()
+    
+    # NPM Packages - axios, express, react, webpack, etc.
+    npm_pattern = r'\b(axios|express|react|vue|angular|webpack|typescript|lodash|jquery|moment|chalk|jest|mocha|cypress|eslint|prettier|babel|rollup|vite|next|nuxt|nest|fastify|hapi|koa|ejs|handlebars|pug|sass|less|postcss|pm2|forever|nodemon|dotenv|jsonwebtoken|bcrypt|passport|cors|helmet|compression|multer|socket\.io|ws|mqtt|amqp|redis|mongodb|mongoose|sequelize|typeorm|knex|prisma|graphql|apollo|relay|fetch|axios|supertest|sinon|chai|should)\b(?:[\s@=^>~-]*([0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][a-z0-9]+)?)?)?'
+    
+    for match in re.finditer(npm_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'npm',
+            'materyel': match.group(0)
+        })
+    
+    # Python Packages - flask, django, requests, sqlalchemy, etc.
+    python_pattern = r'\b(flask|django|requests|sqlalchemy|celery|pytest|pandas|numpy|scipy|scikit-learn|matplotlib|seaborn|jupyter|tensorflow|pytorch|keras|beautifulsoup|selenium|scrapy|fastapi|starlette|pydantic|sqlmodel|tortoise|peewee|alembic|black|pylint|flake8|mypy|poetry|pipenv)\b(?:[\s=<>~-]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)?)?'
+    
+    for match in re.finditer(python_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'python',
+            'materyel': match.group(0)
+        })
+    
+    # Java Libraries - spring-core, commons-io, jboss-logging, etc.
+    java_pattern = r'\b(spring-(?:core|web|boot|security|cloud|data|mvc|expression)|commons-(?:io|lang|codec|logging|collections)|log4j|slf4j|jboss-logging|junit|mockito|jackson|gson|hibernate|jpa|maven|gradle|tomcat|jetty|netty|undertow|wildfly|xstream)\b(?:[-.]([0-9]+\.[0-9]+(?:\.[0-9]+)?)?)?'
+    
+    for match in re.finditer(java_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'java',
+            'materyel': match.group(0)
+        })
+    
+    # Ruby Gems - rails, sinatra, devise, etc.
+    ruby_pattern = r'\b(rails|sinatra|devise|pundit|sidekiq|resque|bundler|rake|thor|rspec|capistrano|puma|unicorn|thin|webrick)\b(?:[\s~>=-]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)?)?'
+    
+    for match in re.finditer(ruby_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'ruby',
+            'materyel': match.group(0)
+        })
+    
+    # PHP Composer - laravel, symfony, wordpress, etc.
+    php_pattern = r'\b(laravel|symfony|wordpress|drupal|magento|composer|doctrine|monolog|swiftmailer|phpunit|guzzle|slim|yii|zend|phalcon|cakephp|code-igniter)\b(?:[\s~>=-]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)?)?'
+    
+    for match in re.finditer(php_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'php',
+            'materyel': match.group(0)
+        })
+    
+    # .NET/C# - asp.net, entity-framework, nuget packages
+    dotnet_pattern = r'\b(asp\.net|entity-framework|linq|newtonsoft\.json|automapper|ninject|unity|autofac|structuremap|log4net|nlog|serilog|xunit|nsubstitute|moq)\b(?:[\s.~>=-]*([0-9]+\.[0-9]+(?:\.[0-9]+)?)?)?'
+    
+    for match in re.finditer(dotnet_pattern, metin_lower):
+        dep_name = match.group(1)
+        version = match.group(2) if len(match.groups()) > 1 else None
+        dependencies.append({
+            'ad': dep_name,
+            'version': version,
+            'tur': 'dotnet',
+            'materyel': match.group(0)
+        })
+    
+    return dependencies
+
+
+def aggregate_dependencies(db_session) -> dict:
+    """Veritabanındaki tüm zafiyetlerden dependency'leri topla"""
+    all_deps = {}
+    all_zafiyetler = db_session.query(Zafiyet).all()
+    
+    for zafiyet in all_zafiyetler:
+        # Başlık, açıklama ve kategoriden dependency'leri çıkart
+        metin = f"{zafiyet.baslik or ''} {zafiyet.aciklama or ''} {zafiyet.etkilenen_yazilimlar or ''}"
+        deps = extract_dependencies(metin)
+        
+        for dep in deps:
+            key = f"{dep['ad']}-{dep['tur']}"
+            if key not in all_deps:
+                all_deps[key] = {
+                    'ad': dep['ad'],
+                    'version': dep['version'],
+                    'tur': dep['tur'],
+                    'adet': 0,
+                    'zafiyetler_ids': [],
+                    'max_severity': None,  # OnemDerecesi Enum
+                    'cve_list': set()
+                }
+            
+            all_deps[key]['adet'] += 1
+            if zafiyet.id not in all_deps[key]['zafiyetler_ids']:
+                all_deps[key]['zafiyetler_ids'].append(zafiyet.id)
+            
+            # En yüksek önem seviyesini sakla
+            if zafiyet.onem_derecesi:
+                current_severity = _onem_sira(zafiyet.onem_derecesi)
+                if all_deps[key]['max_severity'] is None:
+                    all_deps[key]['max_severity'] = zafiyet.onem_derecesi
+                else:
+                    existing_severity = _onem_sira(all_deps[key]['max_severity'])
+                    if current_severity > existing_severity:
+                        all_deps[key]['max_severity'] = zafiyet.onem_derecesi
+            
+            # CVE'leri sakla
+            cve = cve_numarasi_bul(zafiyet)
+            if cve:
+                all_deps[key]['cve_list'].add(cve)
+    
+    return all_deps
 
 
 def _guvenli_rapor_yolu(dosya_adi: str) -> str | None:
@@ -218,32 +490,77 @@ async def anasayfa(request: Request):
         remote_kritik_zafiyetler = remote_kritik_zafiyetler[:20]
 
 
-        github_sayisi = q.filter(Zafiyet.kaynak == "GitHub").count()
-        telegram_sayisi = q.filter(Zafiyet.kaynak == "Telegram").count()
+        # Tüm veri kaynakları için istatistik
+        kaynak_istatistikleri = db.query(
+            Zafiyet.kaynak,
+            func.count(Zafiyet.id).label("adet")
+        ).group_by(Zafiyet.kaynak).all()
+        
+        kaynak_verisi = {}
+        for kaynak, adet in kaynak_istatistikleri:
+            if kaynak:
+                kaynak_verisi[kaynak] = adet
+        
+        github_sayisi = kaynak_verisi.get("GitHub", 0)
+        telegram_sayisi = kaynak_verisi.get("Telegram", 0)
+        exploit_db_sayisi = kaynak_verisi.get("Exploit-DB", 0)
+        zeday_sayisi = kaynak_verisi.get("0day.today", 0)
 
         yedi_gun_once = datetime.now() - timedelta(days=7)
 
-        trend_subquery = q.with_entities(
-            Zafiyet.baslik,
-            Zafiyet.aciklama,
-            Zafiyet.kategori,
-            func.count(Zafiyet.id).label("adet"),
-            func.max(Zafiyet.kaynak).label("kaynak"),
-            func.max(Zafiyet.etkilenen_yazilimlar).label("yazilim"),
-            func.max(Zafiyet.onem_derecesi).label("max_onem"),
-            func.max(Zafiyet.bulunan_tarih).label("son_tarih"),
-            func.max(Zafiyet.url).label("url")
-        ).filter(
+        trend_kayitlari = q.filter(
             and_(
                 Zafiyet.baslik.isnot(None),
                 Zafiyet.baslik != "",
                 Zafiyet.bulunan_tarih >= yedi_gun_once
             )
-        ).group_by(
-            Zafiyet.baslik, Zafiyet.aciklama, Zafiyet.kategori
-        ).order_by(
-            func.count(Zafiyet.id).desc()
-        ).limit(10).all()
+        ).all()
+
+        trend_gruplari = {}
+        for z in trend_kayitlari:
+            cve = cve_numarasi_bul(z)
+            if cve:
+                anahtar = f"cve:{cve}"
+                grup_etiketi = cve
+            else:
+                urun_etiketi = _urun_etiketi_bul(z)
+                anahtar = f"urun:{urun_etiketi}"
+                grup_etiketi = urun_etiketi
+
+            if anahtar not in trend_gruplari:
+                trend_gruplari[anahtar] = {
+                    "anahtar": anahtar,
+                    "grup_etiketi": grup_etiketi,
+                    "baslik": z.baslik or "",
+                    "aciklama": z.aciklama or "",
+                    "kategori": z.kategori or "Belirsiz",
+                    "adet": 0,
+                    "kaynak": z.kaynak,
+                    "yazilim": z.etkilenen_yazilimlar or "-",
+                    "max_onem": z.onem_derecesi,
+                    "son_tarih": z.bulunan_tarih,
+                    "url": z.url,
+                    "onem_skor": _onem_sira(z.onem_derecesi),
+                }
+
+            g = trend_gruplari[anahtar]
+            g["adet"] += 1
+
+            if z.bulunan_tarih and (not g["son_tarih"] or z.bulunan_tarih > g["son_tarih"]):
+                g["baslik"] = z.baslik or g["baslik"]
+                g["aciklama"] = z.aciklama or g["aciklama"]
+                g["kategori"] = z.kategori or g["kategori"]
+                g["kaynak"] = z.kaynak or g["kaynak"]
+                g["yazilim"] = z.etkilenen_yazilimlar or g["yazilim"]
+                g["son_tarih"] = z.bulunan_tarih
+                g["url"] = z.url or g["url"]
+
+            skor = _onem_sira(z.onem_derecesi)
+            if skor > g["onem_skor"]:
+                g["max_onem"] = z.onem_derecesi
+                g["onem_skor"] = skor
+
+        trend_sirali = _trend_sirala(trend_gruplari, limit=10)
 
         try:
             analizci = ZafiyetAnalizci()
@@ -253,11 +570,11 @@ async def anasayfa(request: Request):
             ai_kullanilabilir = False
 
         trend_zafiyetler = []
-        for trend in trend_subquery:
-            orijinal_baslik = trend.baslik
+        for trend in trend_sirali:
+            orijinal_baslik = trend["baslik"]
             if ai_kullanilabilir:
                 try:
-                    zafiyet_metni = f"{trend.baslik}\n{trend.aciklama or ''}\nKategori: {trend.kategori or 'Belirsiz'}\nYazılım: {trend.yazilim or '-'}"
+                    zafiyet_metni = f"{trend['baslik']}\n{trend.get('aciklama') or ''}\nKategori: {trend.get('kategori') or 'Belirsiz'}\nYazılım: {trend.get('yazilim') or '-'}"
                     ai_baslik = analizci.baslik_uret(zafiyet_metni)
                     baslik = ai_baslik if ai_baslik else orijinal_baslik
                 except Exception:
@@ -268,13 +585,13 @@ async def anasayfa(request: Request):
             trend_zafiyetler.append({
                 "baslik": baslik,
                 "orijinal_baslik": orijinal_baslik,
-                "kategori": trend.kategori or "Belirsiz",
-                "adet": trend.adet,
-                "kaynak": trend.kaynak,
-                "yazilim": trend.yazilim or "-",
-                "max_onem": trend.max_onem.value if trend.max_onem else "Bilinmiyor",
-                "son_tarih": trend.son_tarih.strftime("%d.%m.%Y") if trend.son_tarih else "-",
-                "url": trend.url
+                "kategori": trend.get("kategori") or "Belirsiz",
+                "adet": trend.get("adet", 0),
+                "kaynak": trend.get("kaynak"),
+                "yazilim": trend.get("yazilim") or "-",
+                "max_onem": trend["max_onem"].value if trend.get("max_onem") else "Bilinmiyor",
+                "son_tarih": trend["son_tarih"].strftime("%d.%m.%Y") if trend.get("son_tarih") else "-",
+                "url": trend.get("url")
             })
 
         son_7_gun = q.filter(Zafiyet.bulunan_tarih >= yedi_gun_once).count()
@@ -303,6 +620,9 @@ async def anasayfa(request: Request):
             "cve_yok": cve_yok_sayisi,
             "github_sayisi": github_sayisi,
             "telegram_sayisi": telegram_sayisi,
+            "exploit_db_sayisi": exploit_db_sayisi,
+            "zeday_sayisi": zeday_sayisi,
+            "kaynak_verisi": kaynak_verisi,
             "cve_zafiyetler": cve_zafiyetler,
             "cvesiz_zafiyetler": cvesiz_zafiyetler,
             "remote_kritik_zafiyetler": remote_kritik_zafiyetler,
@@ -687,6 +1007,171 @@ async def rapor_gonder(payload: RaporGonderModel):
     konu = payload.konu or f" Haftalık Zafiyet Raporu | {payload.dosya_adi}"
     sonuc = gonderici.toplu_html_gonder(konu, html_icerik)
     return sonuc
+
+
+# ============= DEPENDENCY API ENDPOINTS =============
+
+@app.get("/api/dependencies")
+async def get_dependencies(limit: int = 50, min_severity: str | None = None):
+    """
+    Tüm dependency'leri listele
+    
+    Query Parameters:
+    - limit: Maksimum sonuç sayısı (default: 50)
+    - min_severity: Minimum önem seviyesi (KRITIK, YUKSEK, ORTA, DUSUK, BILGI)
+    
+    Response: JSON array of dependencies with CVE info
+    """
+    db = session_al()
+    try:
+        all_deps = aggregate_dependencies(db)
+        
+        # Önem seviyesine göre filtrele
+        severity_order = {
+            'KRITIK': 5, 'Kritik': 5,
+            'YUKSEK': 4, 'Yüksek': 4,
+            'ORTA': 3, 'Orta': 3,
+            'DUSUK': 2, 'Düşük': 2,
+            'BILGI': 1, 'Bilgi': 1
+        }
+        min_severity_rank = severity_order.get(min_severity or '', 0)
+        
+        # Sıralama: Zafiyet sayısına göre
+        sorted_deps = sorted(
+            all_deps.values(),
+            key=lambda x: (-x['adet'], x['ad'])
+        )[:limit]
+        
+        filtered_deps = []
+        for dep in sorted_deps:
+            # Önem seviyesine göre filtrele
+            if min_severity and dep['max_severity']:
+                severity_str = dep['max_severity'].value if hasattr(dep['max_severity'], 'value') else str(dep['max_severity'])
+                severity_rank = severity_order.get(severity_str, 0)
+                if severity_rank < min_severity_rank:
+                    continue
+            
+            filtered_deps.append({
+                'ad': dep['ad'],
+                'version': dep['version'],
+                'tur': dep['tur'],
+                'adet': dep['adet'],
+                'max_severity': dep['max_severity'].value if dep['max_severity'] and hasattr(dep['max_severity'], 'value') else str(dep['max_severity']) if dep['max_severity'] else None,
+                'cve_list': sorted(list(dep['cve_list'])) if dep['cve_list'] else []
+            })
+        
+        return {
+            'toplam': len(filtered_deps),
+            'kaynaklar': {
+                'npm': len([d for d in filtered_deps if d['tur'] == 'npm']),
+                'python': len([d for d in filtered_deps if d['tur'] == 'python']),
+                'java': len([d for d in filtered_deps if d['tur'] == 'java']),
+                'ruby': len([d for d in filtered_deps if d['tur'] == 'ruby']),
+                'php': len([d for d in filtered_deps if d['tur'] == 'php']),
+                'dotnet': len([d for d in filtered_deps if d['tur'] == 'dotnet']),
+            },
+            'dependencies': filtered_deps,
+            'son_guncelleme': datetime.now().isoformat()
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/dependencies/{package_name}")
+async def get_dependency_details(package_name: str):
+    """
+    Belirli bir dependency'nin detay bilgisini döndür
+    
+    Path Parameters:
+    - package_name: Paket adı (örn: axios, django, spring-core)
+    
+    Response: Detaylı bilgi ve ilişkili zafiyetler
+    """
+    db = session_al()
+    try:
+        all_deps = aggregate_dependencies(db)
+        
+        # Paketi bul (case-insensitive)
+        found_dep = None
+        found_key = None
+        for key, dep in all_deps.items():
+            if dep['ad'].lower() == package_name.lower():
+                found_dep = dep
+                found_key = key
+                break
+        
+        if not found_dep:
+            return {"hata": f"Paket bulunamadı: {package_name}"}
+        
+        # İlişkili zafiyetleri getir
+        related_zafiyetler = db.query(Zafiyet).filter(
+            Zafiyet.id.in_(found_dep['zafiyetler_ids'])
+        ).all()
+        
+        zafiyet_ozet = []
+        for z in related_zafiyetler:
+            zafiyet_ozet.append({
+                'id': z.id,
+                'baslik': z.baslik[:100],
+                'kaynak': z.kaynak,
+                'onem': str(z.onem_derecesi.value) if z.onem_derecesi else 'Bilinmiyor',
+                'kategori': z.kategori,
+                'cve': cve_numarasi_bul(z),
+                'url': z.url
+            })
+        
+        return {
+            'ad': found_dep['ad'],
+            'version': found_dep['version'],
+            'tur': found_dep['tur'],
+            'toplam_zafiyetler': found_dep['adet'],
+            'max_severity': found_dep['max_severity'].value if found_dep['max_severity'] and hasattr(found_dep['max_severity'], 'value') else str(found_dep['max_severity']) if found_dep['max_severity'] else None,
+            'cve_list': sorted(list(found_dep['cve_list'])) if found_dep['cve_list'] else [],
+            'zafiyetler': zafiyet_ozet,
+            'son_guncelleme': datetime.now().isoformat()
+        }
+    finally:
+        db.close()
+
+
+@app.get("/api/dependencies-by-type")
+async def get_dependencies_by_type(type_filter: str = 'npm'):
+    """
+    Türe göre dependency'leri listele
+    
+    Query Parameters:
+    - type_filter: npm, python, java, ruby, php, dotnet
+    
+    Response: Türe ait tüm dependency'ler
+    """
+    db = session_al()
+    try:
+        all_deps = aggregate_dependencies(db)
+        
+        # Türe göre filtrele
+        type_deps = [
+            {
+                'ad': dep['ad'],
+                'version': dep['version'],
+                'adet': dep['adet'],
+                'max_severity': dep['max_severity'].value if dep['max_severity'] and hasattr(dep['max_severity'], 'value') else str(dep['max_severity']) if dep['max_severity'] else None,
+                'cve_list': sorted(list(dep['cve_list'])) if dep['cve_list'] else []
+            }
+            for dep in all_deps.values()
+            if dep['tur'] == type_filter
+        ]
+        
+        # Zafiyet sayısına göre sırala
+        type_deps.sort(key=lambda x: -x['adet'])
+        
+        return {
+            'tur': type_filter,
+            'toplam': len(type_deps),
+            'dependencies': type_deps,
+            'son_guncelleme': datetime.now().isoformat()
+        }
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

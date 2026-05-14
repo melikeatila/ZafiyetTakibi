@@ -19,17 +19,17 @@ load_dotenv()
 
 class MailGonderici:
     def __init__(self):
-        self.smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+        self.smtp_host = (os.getenv("SMTP_HOST", "smtp.gmail.com") or "smtp.gmail.com").strip()
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = os.getenv("SMTP_USER")
-        self.smtp_password = os.getenv("SMTP_PASSWORD")
-        self.smtp_from = os.getenv("SMTP_FROM", self.smtp_user)
-        self.gonderen_ad = os.getenv("SMTP_SENDER_NAME", "Zafiyet Takip Sistemi")
+        self.smtp_user = (os.getenv("SMTP_USER") or "").strip()
+        self.smtp_password = (os.getenv("SMTP_PASSWORD") or "").replace(" ", "").strip()
+        self.smtp_from = (os.getenv("SMTP_FROM", self.smtp_user) or self.smtp_user).strip()
+        self.gonderen_ad = (os.getenv("SMTP_SENDER_NAME", "Zafiyet Takip Sistemi") or "Zafiyet Takip Sistemi").strip()
 
         if not self.smtp_user or not self.smtp_password:
             raise ValueError("SMTP_USER ve SMTP_PASSWORD .env içinde tanımlı olmalı.")
 
-    def mail_gonder(self, alici_email: str, alici_ad: str, konu: str, html_icerik: str) -> bool:
+    def mail_gonder(self, alici_email: str, alici_ad: str, konu: str, html_icerik: str):
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = konu
@@ -38,15 +38,25 @@ class MailGonderici:
             msg.attach(MIMEText(html_icerik, "html", "utf-8"))
 
             with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                server.ehlo()
                 server.starttls()
+                server.ehlo()
                 server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.smtp_from, alici_email, msg.as_string())
 
             print(f" Mail gönderildi: {alici_email}")
-            return True
+            return True, None
+        except smtplib.SMTPAuthenticationError as e:
+            hata = (
+                "SMTP kimlik doğrulama hatası (535). Gmail için App Password kullanın, "
+                "hesapta 2 aşamalı doğrulamayı açın ve .env içindeki SMTP_USER/SMTP_PASSWORD değerlerini kontrol edin."
+            )
+            print(f" Mail gönderilemedi ({alici_email}): {hata} | Detay: {e}")
+            return False, hata
         except Exception as e:
-            print(f" Mail gönderilemedi ({alici_email}): {e}")
-            return False
+            hata = str(e)
+            print(f" Mail gönderilemedi ({alici_email}): {hata}")
+            return False, hata
 
     def haftalik_rapor_gonder(self) -> dict:
         print("\n" + "=" * 60)
@@ -83,17 +93,25 @@ class MailGonderici:
 
         basarili = 0
         basarisiz = 0
+        basarisiz_detaylar = []
 
         for abone in aboneler:
-            if self.mail_gonder(abone.email, abone.ad_soyad, konu, rapor["html"]):
+            ok, hata = self.mail_gonder(abone.email, abone.ad_soyad, konu, rapor["html"])
+            if ok:
                 basarili += 1
             else:
                 basarisiz += 1
+                basarisiz_detaylar.append({"email": abone.email, "hata": hata})
 
         print(f" Başarılı: {basarili} |  Başarısız: {basarisiz}")
         print("=" * 60 + "\n")
 
-        return {"basarili": basarili, "basarisiz": basarisiz, "dosya": dosya_adi}
+        return {
+            "basarili": basarili,
+            "basarisiz": basarisiz,
+            "dosya": dosya_adi,
+            "basarisiz_detaylar": basarisiz_detaylar,
+        }
 
     def toplu_html_gonder(self, konu: str, html_icerik: str) -> dict:
         db = session_al()
@@ -107,13 +125,21 @@ class MailGonderici:
 
         basarili = 0
         basarisiz = 0
+        basarisiz_detaylar = []
         for abone in aboneler:
-            if self.mail_gonder(abone.email, abone.ad_soyad, konu, html_icerik):
+            ok, hata = self.mail_gonder(abone.email, abone.ad_soyad, konu, html_icerik)
+            if ok:
                 basarili += 1
             else:
                 basarisiz += 1
+                basarisiz_detaylar.append({"email": abone.email, "hata": hata})
 
-        return {"mesaj": "Gönderim tamamlandı", "basarili": basarili, "basarisiz": basarisiz}
+        return {
+            "mesaj": "Gönderim tamamlandı",
+            "basarili": basarili,
+            "basarisiz": basarisiz,
+            "basarisiz_detaylar": basarisiz_detaylar,
+        }
 
 
 if __name__ == "__main__":
